@@ -49,14 +49,31 @@ class AcquisitionPlan:
     override_evidence: OverrideEvidence | None = None
 
 
+@dataclass(frozen=True)
+class RunDecision:
+    """Explicit run-level evidence used to select the NO_DATA_CHANGE fast path."""
+
+    no_new_price_facts: bool
+    universe_changed: bool = False
+    corporate_action_refresh_required: bool = False
+    other_fact_change: bool = False
+
+    @property
+    def permits_no_data_change(self) -> bool:
+        return self.no_new_price_facts and not (
+            self.universe_changed
+            or self.corporate_action_refresh_required
+            or self.other_fact_change
+        )
+
+
 class AcquisitionPlanner:
     def __init__(self, config: GeneratorConfig):
         self.config = config
 
     def plan(self, security_code: str, history: SecurityHistory | None, request_end: date,
              *, full_refresh_reason: str | None = None, full_refresh_requested: bool = False,
-             no_data_change: bool = False, override: OverrideEvidence | None = None,
-             forced_overlap_start: date | None = None,
+             override: OverrideEvidence | None = None, forced_overlap_start: date | None = None,
              expected_overlap_observations: int | None = None) -> AcquisitionPlan:
         if full_refresh_requested:
             if not full_refresh_reason or not full_refresh_reason.strip():
@@ -64,23 +81,53 @@ class AcquisitionPlanner:
             return AcquisitionPlan(security_code, AcquisitionMode.FULL_REFRESH,
                 history.latest_observation_date if history else None, None, request_end, 0, None,
                 full_refresh_reason, False, PlanStatus.READY)
-        if no_data_change:
-            return AcquisitionPlan(security_code, AcquisitionMode.NO_DATA_CHANGE,
-                history.latest_observation_date if history else None, None, request_end, 0, 0,
-                None, False, PlanStatus.READY)
         if history is None or history.observation_count < self.config.overlap_observation_target:
             return AcquisitionPlan(security_code, AcquisitionMode.BACKFILL,
                 history.latest_observation_date if history else None, None, request_end, 0,
                 self.config.backfill_target, None, False, PlanStatus.READY)
 
-        overlap = expected_overlap_observations or self.config.overlap_observation_target
-        start = forced_overlap_start or history.observation_dates[-overlap]
-        blocked = overlap > self.config.overlap_max_without_override and override is None
+        start = forced_overlap_start or history.observation_dates[-self.config.overlap_observation_target]
+        if start > request_end:
+            raise PlanValidationError("OVERLAP start must not follow request end")
+        computed_overlap = sum(start <= observed <= request_end
+                               for observed in history.observation_dates)
+        if computed_overlap == 0:
+            raise PlanValidationError("OVERLAP start must include existing observations")
+        if (expected_overlap_observations is not None
+                and expected_overlap_observations != computed_overlap):
+            raise PlanValidationError(
+                "caller-supplied overlap count does not match history-derived count: "
+                f"{expected_overlap_observations} != {computed_overlap}"
+            )
+        blocked = (computed_overlap > self.config.overlap_max_without_override
+                   and override is None)
         return AcquisitionPlan(security_code, AcquisitionMode.OVERLAP,
-            history.latest_observation_date, start, request_end, overlap, None, None,
+            history.latest_observation_date, start, request_end, computed_overlap, None, None,
             override is not None,
             PlanStatus.ACQUISITION_PLAN_BLOCKED if blocked else PlanStatus.READY, override)
 
-    def plan_all(self, histories: dict[str, SecurityHistory], request_end: date, **kwargs):
+    def plan_all(self, histories: dict[str, SecurityHistory | None], request_end: date, *,
+                 run_decision: RunDecision | None = None,
+                 full_refresh_reasons: dict[str, str] | None = None, **kwargs):
+        full_refresh_reasons = full_refresh_reasons or {}
+        if run_decision is not None:
+            if not run_decision.permits_no_data_change:
+                raise PlanValidationError("run evidence does not permit NO_DATA_CHANGE")
+            if full_refresh_reasons:
+                raise PlanValidationError("NO_DATA_CHANGE conflicts with FULL_REFRESH")
+            insufficient = [code for code, item in histories.items()
+                            if item is None or
+                            item.observation_count < self.config.overlap_observation_target]
+            if insufficient:
+                raise PlanValidationError(
+                    "NO_DATA_CHANGE conflicts with new/insufficient-history securities: "
+                    f"{insufficient[:5]}"
+                )
+            return [AcquisitionPlan(code, AcquisitionMode.NO_DATA_CHANGE,
+                    item.latest_observation_date, None, request_end, 0, 0, None, False,
+                    PlanStatus.READY) for code, item in sorted(histories.items())]
         return [self.plan(code, history, request_end, **kwargs)
+                if code not in full_refresh_reasons else
+                self.plan(code, history, request_end, full_refresh_requested=True,
+                          full_refresh_reason=full_refresh_reasons[code], **kwargs)
                 for code, history in sorted(histories.items())]

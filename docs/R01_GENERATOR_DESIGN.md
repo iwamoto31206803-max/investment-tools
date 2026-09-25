@@ -42,10 +42,13 @@ Current Standard.
   counting back from that security's latest observation (20 by default).
 * `BACKFILL`: a new security or one with fewer than N observations; target 150.
 * `FULL_REFRESH`: allowed only with a non-empty explicit reason.
-* `NO_DATA_CHANGE`: available only when the caller explicitly supplies that
-  run-level evidence decision.
+* `NO_DATA_CHANGE`: available only through `plan_all` with explicit run-level
+  evidence. It is rejected when a fact-change signal, full-refresh requirement,
+  or new/insufficient-history security contradicts the fast path.
 
-An OVERLAP whose expected observations exceed the configured maximum is blocked
+For every OVERLAP, the generator derives the expected count from the requested
+start and that security's history. A caller count is only a cross-check; a
+mismatch is a validation failure. A derived count over the configured maximum is blocked
 unless structured override evidence supplies reason, decision source, original
 and override windows, and timestamp. Validation errors, exceptions, and blocked
 plans are distinct; the CLI returns nonzero for `FAIL` or `BLOCKED` and still

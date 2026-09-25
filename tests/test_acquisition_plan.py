@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from r01_generator.acquisition_plan import (AcquisitionMode, AcquisitionPlanner,
-    OverrideEvidence, PlanStatus)
+    OverrideEvidence, PlanStatus, RunDecision)
 from r01_generator.config import GeneratorConfig
 from r01_generator.package_reader import SecurityHistory
 from r01_generator.validation import PlanValidationError
@@ -35,28 +35,59 @@ def test_new_and_short_security_backfill_but_sufficient_does_not():
     assert planner.plan("old", history(count=20), date(2026, 9, 18)).acquisition_mode is AcquisitionMode.OVERLAP
 
 
-def test_full_refresh_requires_reason_and_no_change():
+def test_full_refresh_requires_reason():
     planner = AcquisitionPlanner(GeneratorConfig())
     with pytest.raises(PlanValidationError, match="explicit reason"):
         planner.plan("1001", history(), date(2026, 9, 18), full_refresh_requested=True)
     plan = planner.plan("1001", history(), date(2026, 9, 18),
                         full_refresh_requested=True, full_refresh_reason="source correction")
     assert plan.acquisition_mode is AcquisitionMode.FULL_REFRESH
-    assert planner.plan("1001", history(), date(2026, 9, 18),
-                        no_data_change=True).acquisition_mode is AcquisitionMode.NO_DATA_CHANGE
+
+
+def test_no_data_change_is_run_level_and_rejects_contradictions():
+    planner = AcquisitionPlanner(GeneratorConfig())
+    histories = {"1001": history()}
+    plans = planner.plan_all(histories, date(2026, 9, 18),
+                             run_decision=RunDecision(no_new_price_facts=True))
+    assert [plan.acquisition_mode for plan in plans] == [AcquisitionMode.NO_DATA_CHANGE]
+
+    with pytest.raises(PlanValidationError, match="FULL_REFRESH"):
+        planner.plan_all(histories, date(2026, 9, 18),
+                         run_decision=RunDecision(no_new_price_facts=True),
+                         full_refresh_reasons={"1001": "source correction"})
+    with pytest.raises(PlanValidationError, match="insufficient-history"):
+        planner.plan_all({"new": None}, date(2026, 9, 18),
+                         run_decision=RunDecision(no_new_price_facts=True))
+    with pytest.raises(PlanValidationError, match="does not permit"):
+        planner.plan_all(histories, date(2026, 9, 18),
+                         run_decision=RunDecision(no_new_price_facts=True,
+                                                  universe_changed=True))
 
 
 def test_excessive_overlap_blocked_and_valid_override_ready():
     planner = AcquisitionPlanner(GeneratorConfig())
     end, start = date(2026, 9, 18), date(2026, 5, 1)
-    blocked = planner.plan("1001", history(count=100), end, forced_overlap_start=start,
+    item = history(count=96, start=start)
+    blocked = planner.plan("1001", item, end, forced_overlap_start=start,
                            expected_overlap_observations=96)
     assert blocked.plan_status is PlanStatus.ACQUISITION_PLAN_BLOCKED
     evidence = OverrideEvidence("approved investigation", "change-42", (start, end),
                                 (start, end), datetime.now(timezone.utc))
-    ready = planner.plan("1001", history(count=100), end, forced_overlap_start=start,
+    ready = planner.plan("1001", item, end, forced_overlap_start=start,
                          expected_overlap_observations=96, override=evidence)
     assert ready.plan_status is PlanStatus.READY and ready.override_flag
+
+
+def test_old_forced_start_computes_overlap_and_cannot_be_underreported():
+    planner = AcquisitionPlanner(GeneratorConfig())
+    item = history(count=96, start=date(2026, 5, 1))
+    end = item.latest_observation_date
+    blocked = planner.plan("1001", item, end, forced_overlap_start=date(2026, 5, 1))
+    assert blocked.expected_overlap_observations == 96
+    assert blocked.plan_status is PlanStatus.ACQUISITION_PLAN_BLOCKED
+    with pytest.raises(PlanValidationError, match="does not match"):
+        planner.plan("1001", item, end, forced_overlap_start=date(2026, 5, 1),
+                     expected_overlap_observations=20)
 
 
 def test_override_requires_evidence_fields():
