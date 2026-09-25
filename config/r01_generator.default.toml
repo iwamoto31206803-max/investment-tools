@@ -1,0 +1,8 @@
+overlap_observation_target = 20
+overlap_max_without_override = 35
+backfill_target = 150
+provider_retry_count = 3
+mmap_enabled = true
+mmap_max_xml_size = 1073741824
+streaming_fallback_enabled = true
+validation_profile = "development"
