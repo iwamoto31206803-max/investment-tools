@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "r01-stockfacts-generator"
+dynamic = ["version"]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+r01-generator = "r01_generator.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "r01_generator.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
