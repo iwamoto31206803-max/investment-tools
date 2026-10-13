@@ -71,3 +71,9 @@ limitations, including the absence of a trading-calendar completeness oracle.
 Phase 2B can consume these development outputs after review to implement selective
 writing/rebuild and formal quality calculations. Those capabilities and production
 approval are outside Phase 2A.
+
+Synthetic integration is reproducible without live network access using the supplied
+fixture generator and `scripts/run_phase2a_synthetic_integration.py`.
+See the [development integration report](docs/development/PHASE2A_SYNTHETIC_INTEGRATION_REPORT.md)
+for commands, the 8725/7181 results, expected rejection/failure cases, and limitations.
+These results do not establish real-R01 performance or successful live Yahoo acquisition.

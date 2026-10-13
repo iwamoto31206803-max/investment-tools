@@ -1,0 +1,318 @@
+{
+  "analysis_date": "2026-09-24",
+  "cases": {
+    "blocked_96": {
+      "provider_call_count": 0,
+      "results": [
+        {
+          "normalized_count": 0,
+          "retry_count": 0,
+          "returned_count": null,
+          "security_code": "7181",
+          "status": "REJECTED"
+        },
+        {
+          "normalized_count": 0,
+          "retry_count": 0,
+          "returned_count": null,
+          "security_code": "8725",
+          "status": "REJECTED"
+        }
+      ],
+      "validation_result": "FAIL"
+    },
+    "duplicate": {
+      "provider_call_count": 2,
+      "results": [
+        {
+          "normalized_count": 0,
+          "retry_count": 0,
+          "returned_count": 47,
+          "security_code": "7181",
+          "status": "DATA_QUALITY_ERROR"
+        },
+        {
+          "normalized_count": 46,
+          "retry_count": 0,
+          "returned_count": 46,
+          "security_code": "8725",
+          "status": "SUCCESS"
+        }
+      ],
+      "validation_result": "FAIL"
+    },
+    "empty": {
+      "provider_call_count": 2,
+      "results": [
+        {
+          "normalized_count": 0,
+          "retry_count": 0,
+          "returned_count": 0,
+          "security_code": "7181",
+          "status": "NO_DATA"
+        },
+        {
+          "normalized_count": 0,
+          "retry_count": 0,
+          "returned_count": 0,
+          "security_code": "8725",
+          "status": "NO_DATA"
+        }
+      ],
+      "validation_result": "NO_DATA"
+    },
+    "missing_overlap": {
+      "provider_call_count": 2,
+      "results": [
+        {
+          "normalized_count": 45,
+          "retry_count": 0,
+          "returned_count": 45,
+          "security_code": "7181",
+          "status": "PARTIAL"
+        },
+        {
+          "normalized_count": 46,
+          "retry_count": 0,
+          "returned_count": 46,
+          "security_code": "8725",
+          "status": "SUCCESS"
+        }
+      ],
+      "validation_result": "PARTIAL"
+    },
+    "no_data_change": {
+      "provider_call_count": 0,
+      "results": [
+        {
+          "normalized_count": 0,
+          "retry_count": 0,
+          "returned_count": 0,
+          "security_code": "7181",
+          "status": "NO_DATA_CHANGE"
+        },
+        {
+          "normalized_count": 0,
+          "retry_count": 0,
+          "returned_count": 0,
+          "security_code": "8725",
+          "status": "NO_DATA_CHANGE"
+        }
+      ],
+      "validation_result": "PASS"
+    },
+    "one_provider_failure": {
+      "provider_call_count": 2,
+      "results": [
+        {
+          "normalized_count": 46,
+          "retry_count": 0,
+          "returned_count": 46,
+          "security_code": "7181",
+          "status": "SUCCESS"
+        },
+        {
+          "normalized_count": 0,
+          "retry_count": 0,
+          "returned_count": null,
+          "security_code": "8725",
+          "status": "PROVIDER_ERROR"
+        }
+      ],
+      "validation_result": "FAIL"
+    },
+    "outside_bounds": {
+      "provider_call_count": 2,
+      "results": [
+        {
+          "normalized_count": 0,
+          "retry_count": 0,
+          "returned_count": 47,
+          "security_code": "7181",
+          "status": "DATA_QUALITY_ERROR"
+        },
+        {
+          "normalized_count": 46,
+          "retry_count": 0,
+          "returned_count": 46,
+          "security_code": "8725",
+          "status": "SUCCESS"
+        }
+      ],
+      "validation_result": "FAIL"
+    },
+    "retry": {
+      "provider_call_count": 3,
+      "results": [
+        {
+          "normalized_count": 46,
+          "retry_count": 1,
+          "returned_count": 46,
+          "security_code": "7181",
+          "status": "SUCCESS"
+        },
+        {
+          "normalized_count": 46,
+          "retry_count": 0,
+          "returned_count": 46,
+          "security_code": "8725",
+          "status": "SUCCESS"
+        }
+      ],
+      "validation_result": "PASS"
+    },
+    "success": {
+      "provider_call_count": 2,
+      "results": [
+        {
+          "normalized_count": 46,
+          "retry_count": 0,
+          "returned_count": 46,
+          "security_code": "7181",
+          "status": "SUCCESS"
+        },
+        {
+          "normalized_count": 46,
+          "retry_count": 0,
+          "returned_count": 46,
+          "security_code": "8725",
+          "status": "SUCCESS"
+        }
+      ],
+      "validation_result": "PASS"
+    }
+  },
+  "config_hash": "34644c6a6ef734129279410b5afb714072caadad3bd398ecfe46b6a6ae543592",
+  "execution_timestamp": "2026-10-13T15:06:44.043828+00:00",
+  "false_overlap_count_rejected": [
+    "7181",
+    "8725"
+  ],
+  "fixture": {
+    "component_inventory": [
+      {
+        "compressed_size": 272,
+        "path": "[Content_Types].xml",
+        "sha256": "188b7fff0bf4e57fcb190fe27640e24606f2e7c38bddad8ab39c6b9b2bfcc31b",
+        "uncompressed_size": 1492
+      },
+      {
+        "compressed_size": 164,
+        "path": "_rels/.rels",
+        "sha256": "b2d2291c3daf8f4f0a9cf5a5c34d71a846584595011ff864594cf5b039cfc99a",
+        "uncompressed_size": 278
+      },
+      {
+        "compressed_size": 285,
+        "path": "xl/workbook.xml",
+        "sha256": "f04d5a34e79dcb42551262b1c494ccaf8f034335e6e50696e75ed6f08986f4d7",
+        "uncompressed_size": 641
+      },
+      {
+        "compressed_size": 212,
+        "path": "xl/_rels/workbook.xml.rels",
+        "sha256": "43e101319292c3bbf99062f33cc7374b0c54c8634d30542b4d9249866bcc0472",
+        "uncompressed_size": 1266
+      },
+      {
+        "compressed_size": 295,
+        "path": "xl/worksheets/sheet1.xml",
+        "sha256": "e6e19ea4782ecceb27b2c70e5abd936ba8afdeaec16bc16f8ab8328f02731956",
+        "uncompressed_size": 703
+      },
+      {
+        "compressed_size": 378,
+        "path": "xl/worksheets/sheet2.xml",
+        "sha256": "c96200c09dc0622126cd034e271c5e0ddbe9afa6b0041b7d0a4df3591e2a5598",
+        "uncompressed_size": 1180
+      },
+      {
+        "compressed_size": 497,
+        "path": "xl/worksheets/sheet3.xml",
+        "sha256": "27a822b431b703251d4e966f981696adbd6c38f1f6b9c395945064fb22afe7ca",
+        "uncompressed_size": 2501
+      },
+      {
+        "compressed_size": 488,
+        "path": "xl/worksheets/sheet4.xml",
+        "sha256": "0ec36dde7adeeda9c8b34ce131164ec207a48447eee68cf1f4f2a7d2ee29dbfc",
+        "uncompressed_size": 2213
+      },
+      {
+        "compressed_size": 30815,
+        "path": "xl/worksheets/sheet5.xml",
+        "sha256": "a554e23effcdb428fd1e0976bcacab6758e85b80dd173103a37806b655cfdd79",
+        "uncompressed_size": 390184
+      },
+      {
+        "compressed_size": 699,
+        "path": "xl/worksheets/sheet6.xml",
+        "sha256": "fa62ca973f93d90e0bd7b0c9084564ca25fddd1e98d541ad764964eb1984b09d",
+        "uncompressed_size": 4033
+      },
+      {
+        "compressed_size": 549,
+        "path": "xl/worksheets/sheet7.xml",
+        "sha256": "192cd68a40d8b9399e39f4411bb311716d07e674c2a029a846ea4e6fcc27c0ce",
+        "uncompressed_size": 2966
+      },
+      {
+        "compressed_size": 316,
+        "path": "xl/worksheets/sheet8.xml",
+        "sha256": "7317fd9793a6f64dc44170dcd710541f1ca845932d6288dbf9c7d4dfaa61a896",
+        "uncompressed_size": 814
+      }
+    ],
+    "input_sha256": "968ebb7cfb4dbce6e4fc4f4f3737348ee9e9a8c8da2369eeab90366ce33c5d6b",
+    "row_counts": {
+      "acquisition_log": 2,
+      "corporate_actions": 0,
+      "metadata": 2,
+      "quality_summary": 2,
+      "source_registry": 1,
+      "stock_daily": 370,
+      "stock_master": 2,
+      "universe": 2
+    },
+    "sheets": [
+      "acquisition_log",
+      "corporate_actions",
+      "metadata",
+      "quality_summary",
+      "source_registry",
+      "stock_daily",
+      "stock_master",
+      "universe"
+    ],
+    "zip_member_count": 12
+  },
+  "histories": {
+    "7181": {
+      "count": 185,
+      "first_date": "2025-12-01",
+      "last_date": "2026-08-14"
+    },
+    "8725": {
+      "count": 185,
+      "first_date": "2025-12-01",
+      "last_date": "2026-08-14"
+    }
+  },
+  "input_sha256_after": "968ebb7cfb4dbce6e4fc4f4f3737348ee9e9a8c8da2369eeab90366ce33c5d6b",
+  "live_network_calls": 0,
+  "mock_cli": {
+    "exit_code": 0,
+    "normalized_count": 92,
+    "normalized_output_sha256": "8a23a8045bab3d41c1f7ce646938fbb587c4ac9838c48fe7e49a10acddedfe40",
+    "provider_call_count": 2,
+    "validation_result": "PASS"
+  },
+  "plan_hash": "1487b2b8bdaf05465d7534103002c41cffd3a8f253bce76e652928ae609cdd05",
+  "production_approved": false,
+  "script_sha256": {
+    "generate_r01_synthetic_fixture.py": "a583e79d18175c16484b1929a9b35be65463f02e39ae14f99cb1f95f6417e9cc",
+    "run_phase2a_synthetic_integration.py": "18790ed5fd4b387e39a8b337cb21ff29d41db5150134aa88425c2c3ef7740a39"
+  },
+  "source_commit": "6fa626369135ccb85ffd3b1245afcb0d620d104b",
+  "synthetic_only": true
+}
