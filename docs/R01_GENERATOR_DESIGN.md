@@ -71,3 +71,14 @@ for future tuning; the safe streaming parser is used now because ZIP members are
 compressed streams. Phase 2 can add acquisition adapters, explicit trading-calendar
 estimation, selective writing/rebuild, quality calculation, and measured real-R01
 integration without changing TA/T03 semantics.
+
+## Phase 2A handoff
+
+The preserved Phase 1 planner is now consumed by the development-only
+[Phase 2A acquisition engine](R01_ACQUISITION_DESIGN.md). Offline planning remains
+the default. Live Yahoo calls require explicit `--acquire` and an input-bound
+selected-security/window contract; the adapter never derives missing starts or
+expands planner windows. Normalized development JSONL and extended run JSON are
+separate from the unchanged input XLSX. Phase 1's reader/planner semantics and
+original tests remain intact. Selective XLSX writing/rebuild and formal quality
+updates are still reserved for Phase 2B and require separate review.

@@ -30,6 +30,15 @@ class RunContext:
     validation_result: str = "NOT_RUN"
     elapsed_seconds: float = 0.0
     peak_rss_mb: float = 0.0
+    acquisition_engine_version: str | None = None
+    plan_hash: str | None = None
+    provider: str | None = None
+    development_contract_hash: str | None = None
+    development_decision_source: str | None = None
+    acquisition_results: list[dict] = field(default_factory=list)
+    normalized_output: str | None = None
+    normalized_output_sha256: str | None = None
+    input_sha256_after: str | None = None
     _started: float = field(default_factory=time.monotonic, repr=False)
 
     def finish(self) -> None:
@@ -41,4 +50,6 @@ class RunContext:
         data = asdict(self)
         data.pop("_started", None)
         data["analysis_date"] = self.analysis_date.isoformat()
-        Path(path).write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        from .acquisition.models import json_value
+        Path(path).write_text(json.dumps(data, default=json_value, indent=2, sort_keys=True)
+                              + "\n", encoding="utf-8")
