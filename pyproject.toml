@@ -8,11 +8,17 @@ dynamic = ["version"]
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+dev = ["pytest==8.4.2", "ruff==0.14.0"]
+
 [project.scripts]
 r01-generator = "r01_generator.cli:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "r01_generator.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["r01_generator*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
