@@ -5,8 +5,9 @@ Development tooling for reproducible investment-data artifacts.
 **Development only. Production Not Yet Approved.** R01 StockFacts Generator
 Phase 2A adds opt-in Yahoo acquisition behind the preserved Phase 1 planner and
 sanity gate. It reads R01 XLSX without modifying it and produces development JSON
-evidence and normalized JSONL. It does not write XLSX, upload to Google Drive,
-update formal artifacts, or make trading decisions.
+evidence and normalized JSONL. Phase 2B adds an opt-in selective writer to a new
+development XLSX. It does not upload to Google Drive, update formal artifacts,
+or make trading decisions.
 
 - [Phase 1 reader/planner design](docs/R01_GENERATOR_DESIGN.md)
 - [Phase 2A acquisition architecture and contract](docs/R01_ACQUISITION_DESIGN.md)
@@ -68,9 +69,38 @@ These outcomes return nonzero and cannot become `PASS`. Calendar gaps are retain
 without inventing holiday rows or zero prices. See the design for validation and
 limitations, including the absence of a trading-calendar completeness oracle.
 
-Phase 2B can consume these development outputs after review to implement selective
-writing/rebuild and formal quality calculations. Those capabilities and production
-approval are outside Phase 2A.
+Phase 2B supports complete OVERLAP replacement/insertion and byte-identical
+NO_DATA_CHANGE copies. Add `--output-xlsx /tmp/r01-development-run-001/updated.xlsx`
+and `--writer-source-id <existing-source_registry-ID>` to the acquisition command.
+The existing registry ID must be supplied explicitly; no source definitions are
+created. Failed/incomplete batches publish no XLSX. Outputs must be new paths in
+the development directory; the input is never overwritten.
+
+Only stock_daily XML is materialized, one row at a time with disk-backed duplicate
+keys. Other ZIP component contents remain byte-identical (ZIP compression may
+change). Updated prices and provenance come from typed acquisition results;
+unavailable adjusted close/volume stay blank. Updated adjusted OHLC, adjustment
+factor and quality flags are cleared rather than retaining stale derived values.
+Other seven sheets, including quality_summary, remain unchanged. Formal quality
+is **not recalculated**; the new workbook is development-only and comes with
+`updated.xlsx.writer.json` evidence plus the CLI run log. BACKFILL/FULL_REFRESH,
+stock_daily formulas/tables/merged cells/extensions are unsupported for updates
+and fail closed. NO_DATA_CHANGE copies the input bytes without XML rewriting.
+
+Run a complete offline demonstration (no live transport is constructed):
+
+```bash
+python scripts/demo_phase2b_selective_writer.py \
+  --development-dir /tmp/r01-phase2b-demo-001
+```
+
+This creates a synthetic input, a selectively updated XLSX, a NO_DATA_CHANGE XLSX,
+normalized JSONL and acquisition/writer evidence. See the
+[short execution report](docs/development/PHASE2B_SELECTIVE_WRITER_REPORT.md).
+The approximately 20 MB accepted workbook has not been benchmarked; this design
+avoids workbook-wide cell objects and retains the existing Reader date indexes
+and shared-string handling. Production approval and formal quality calculations
+remain outside this MVP.
 
 Synthetic integration is reproducible without live network access using the supplied
 fixture generator and `scripts/run_phase2a_synthetic_integration.py`.

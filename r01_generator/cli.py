@@ -17,6 +17,7 @@ from .acquisition.contract import DevelopmentContract
 from .acquisition.engine import AcquisitionEngine
 from .acquisition.models import canonical_hash, json_value, run_validation
 from .acquisition.provider import ProviderSettings, UrllibTransport, YahooChartProvider
+from .selective_writer import write_development_xlsx
 
 
 def parser() -> argparse.ArgumentParser:
@@ -33,11 +34,15 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--development-contract", help="input-bound JSON selection and window approvals")
     result.add_argument("--development-dir", help="new directory for development acquisition outputs")
     result.add_argument("--execution", choices=["sequential"], default="sequential")
+    result.add_argument("--output-xlsx", help="opt-in development XLSX inside the new development directory")
+    result.add_argument("--writer-source-id", help="existing source_registry ID for the acquired provider")
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if args.output_xlsx and (not args.acquire or not args.writer_source_id):
+        parser().error("--output-xlsx requires --acquire and an explicit --writer-source-id")
     input_path = Path(args.input).resolve()
     log_path = Path(args.output_run_log).resolve()
     protected = [input_path, Path(args.config).resolve()]
@@ -50,6 +55,12 @@ def main(argv: list[str] | None = None) -> int:
         if not args.development_contract or not args.development_dir:
             parser().error("--acquire requires --development-contract and --development-dir")
         development_dir = Path(args.development_dir).resolve()
+        if args.output_xlsx:
+            xlsx = Path(args.output_xlsx).resolve()
+            if (xlsx.parent.resolve() != development_dir or xlsx == log_path or
+                    xlsx.name == "observations.jsonl" or
+                    xlsx.with_suffix(xlsx.suffix + ".writer.json") == log_path):
+                parser().error("XLSX and writer sidecar need distinct paths in the development directory")
         if (development_dir.exists() or log_path.parent != development_dir or
                 log_path.name == "observations.jsonl"):
             parser().error("acquisition requires a new development directory containing the run log")
@@ -104,6 +115,13 @@ def main(argv: list[str] | None = None) -> int:
                         stream.write(json.dumps(record, default=json_value, sort_keys=True) + "\n")
             context.normalized_output = str(output)
             context.normalized_output_sha256 = file_sha256(output)
+            if args.output_xlsx:
+                context.writer_result = write_development_xlsx(args.input, args.output_xlsx, results,
+                    expected_input_sha256=before, source_ids={"Yahoo Chart API": args.writer_source_id},
+                    config=config, run_evidence={"run_id": context.run_id,
+                        "source_commit": context.source_commit, "config_hash": context.config_hash,
+                        "development_contract_hash": context.development_contract_hash,
+                        "normalized_output_sha256": context.normalized_output_sha256})
         else:
             context.validation_result = "BLOCKED" if context.blocked_count else "PASS"
         if file_sha256(args.input) != before:
