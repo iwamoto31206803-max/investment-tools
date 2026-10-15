@@ -1,0 +1,54 @@
+{
+  "live_provider_calls": 0,
+  "results": {
+    "no_data_change": {
+      "elapsed_seconds": 0.32083,
+      "input_row_count": 370,
+      "input_sha256": "89323433456413d13f786332a00d0280c74618c5116f7af1c5df93b3f8ddb887",
+      "input_sha256_after": "89323433456413d13f786332a00d0280c74618c5116f7af1c5df93b3f8ddb887",
+      "mock_provider_calls": 0,
+      "output_row_count": 370,
+      "output_sha256": "89323433456413d13f786332a00d0280c74618c5116f7af1c5df93b3f8ddb887",
+      "process_peak_rss_mb": 23.883,
+      "supported_modes": [
+        "OVERLAP",
+        "NO_DATA_CHANGE"
+      ],
+      "unsupported_modes": [
+        "BACKFILL",
+        "FULL_REFRESH"
+      ],
+      "updated_securities": {
+        "8725": {
+          "inserted": 0,
+          "replaced": 0
+        }
+      }
+    },
+    "overlap": {
+      "elapsed_seconds": 0.423535,
+      "input_row_count": 370,
+      "input_sha256": "89323433456413d13f786332a00d0280c74618c5116f7af1c5df93b3f8ddb887",
+      "input_sha256_after": "89323433456413d13f786332a00d0280c74618c5116f7af1c5df93b3f8ddb887",
+      "mock_provider_calls": 1,
+      "output_row_count": 396,
+      "output_sha256": "0537cff3ae2eb799d0d933e82fe021a905c8d382826407375fa5fb41a769c0a6",
+      "process_peak_rss_mb": 23.883,
+      "supported_modes": [
+        "OVERLAP",
+        "NO_DATA_CHANGE"
+      ],
+      "unsupported_modes": [
+        "BACKFILL",
+        "FULL_REFRESH"
+      ],
+      "updated_securities": {
+        "8725": {
+          "inserted": 26,
+          "replaced": 20
+        }
+      }
+    }
+  },
+  "synthetic_only": true
+}

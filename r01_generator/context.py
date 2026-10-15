@@ -39,6 +39,7 @@ class RunContext:
     normalized_output: str | None = None
     normalized_output_sha256: str | None = None
     input_sha256_after: str | None = None
+    writer_result: dict | None = None
     _started: float = field(default_factory=time.monotonic, repr=False)
 
     def finish(self) -> None:
