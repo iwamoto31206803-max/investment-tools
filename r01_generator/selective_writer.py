@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from copy import copy
+from copy import copy, deepcopy
 from decimal import Decimal
 import hashlib
 import json
@@ -14,13 +14,15 @@ import sqlite3
 import tempfile
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile
+from datetime import date
+from urllib.parse import urlparse
 
 from .acquisition.engine import validate_observations, validate_plan
 from .acquisition.models import ResultStatus, canonical_hash, json_value
 from .acquisition.normalization import DataQualityError
 from .acquisition_plan import AcquisitionMode, RunDecision
 from .config import GeneratorConfig
-from .package_reader import MAIN, REQUIRED_SHEETS, R01PackageReader, file_sha256
+from .package_reader import MAIN, REQUIRED_SHEETS, R01PackageReader, file_sha256, cell_value
 from .validation import PlanValidationError
 from . import __version__
 
@@ -46,6 +48,8 @@ def _rows(archive, member):
         root, sheet_data, namespaces = None, None, {}
         for event, element in parser:
             if event == "start-ns":
+                _require(element[0] not in namespaces or namespaces[element[0]] == element[1],
+                         "namespace prefix rebinding unsupported; refusing lossy serialization")
                 namespaces[element[0]] = element[1]
             elif event == "start":
                 if root is None:
@@ -69,16 +73,12 @@ def _values(row, shared, *, allow_formulas=False):
         _require(col not in values, "duplicate cell column")
         _require(allow_formulas or cell.find(f"{{{MAIN}}}f") is None,
                  "stock_daily formula cells unsupported by update MVP")
-        value = cell.find(f"{{{MAIN}}}v")
-        text = value.text if value is not None else "".join(
-            node.text or "" for node in cell.findall(f".//{{{MAIN}}}t"))
-        if cell.get("t") == "s":
-            text = shared[int(text)]
-        values[col] = text or ""
+        values[col] = cell_value(cell, shared)
     return values
 
 
 def _columns(header):
+    header = {col: value for col, value in header.items() if value.strip()}
     names = [value.strip().upper() for value in header.values()]
     _require(len(names) == len(set(names)) and all(names), "duplicate/empty stock_daily headers")
     columns = {value.strip().upper(): col for col, value in header.items()}
@@ -90,10 +90,10 @@ def _columns(header):
     return columns, date_name
 
 
-def _key(values, columns, date_name):
+def _key(values, columns, date_name, date_1904=False):
     code, raw = values.get(columns["SECURITY_CODE"], "").strip(), values.get(columns[date_name], "").strip()
     _require(code and raw, "stock_daily contains a missing security/date key")
-    return code, R01PackageReader._excel_date(raw)
+    return code, R01PackageReader._excel_date(raw, date_1904)
 
 
 def _fingerprint(digest, row):
@@ -104,7 +104,7 @@ def _fingerprint(digest, row):
     row.tail = tail
 
 
-def _set_cell(row, column, value, numeric=False):
+def _set_cell(row, column, value, numeric=False, cell_type=None):
     ref = column + row.get("r")
     cell = next((c for c in row if c.get("r") == ref), None)
     if cell is None:
@@ -113,8 +113,8 @@ def _set_cell(row, column, value, numeric=False):
         cell.remove(child)
     cell.attrib.pop("t", None)
     if value is not None:
-        if numeric:
-            cell.set("t", "n")
+        if numeric or cell_type == "d":
+            cell.set("t", cell_type or "n")
             ET.SubElement(cell, f"{{{MAIN}}}v").text = str(value)
         else:
             cell.set("t", "inlineStr")
@@ -123,10 +123,18 @@ def _set_cell(row, column, value, numeric=False):
     row[:] = sorted(row, key=lambda c: (len(re.sub(r"[0-9]", "", c.get("r", ""))), c.get("r", "")))
 
 
-def _materialize(row, observation, columns, date_name, source_id, *, new=False):
+def _materialize(row, observation, columns, date_name, source_id, *, new=False, template=None, date_1904=False):
     if new:
         _set_cell(row, columns["SECURITY_CODE"], observation.SECURITY_CODE)
-        _set_cell(row, columns[date_name], observation.OBSERVATION_DATE.isoformat())
+        date_cell = next((cell for cell in template if cell.get("r", "").rstrip("0123456789") == columns[date_name]), None)
+        kind = date_cell.get("t", "n") if date_cell is not None else "inlineStr"
+        value = observation.OBSERVATION_DATE.isoformat()
+        if kind == "n":
+            epoch = date(1904, 1, 1) if date_1904 else date(1899, 12, 30)
+            value = (observation.OBSERVATION_DATE - epoch).days
+            if not date_1904 and observation.OBSERVATION_DATE < date(1900, 3, 1):
+                value -= 1
+        _set_cell(row, columns[date_name], value, numeric=kind == "n", cell_type=kind if kind == "d" else None)
     for name in PRICES:
         _set_cell(row, columns[name], getattr(observation, name), numeric=True)
     for name, value in {"SOURCE_ID": source_id, "ACQUISITION_METHOD": observation.SOURCE,
@@ -139,6 +147,25 @@ def _materialize(row, observation, columns, date_name, source_id, *, new=False):
         _set_cell(row, columns["DATA_QUALITY_NOTE"], "Development update; formal quality not recalculated")
     row.attrib.pop("spans", None)
     return row
+
+
+def _new_row(template, number):
+    row = ET.Element(f"{{{MAIN}}}row", {"r": str(number), **{
+        key: value for key, value in template.attrib.items() if key in {"s", "customFormat", "ht", "customHeight"}}})
+    for cell in template.findall(f"{{{MAIN}}}c"):
+        column = cell.get("r", "").rstrip("0123456789")
+        attrs = {"r": f"{column}{number}"}
+        if "s" in cell.attrib:
+            attrs["s"] = cell.get("s")
+        ET.SubElement(row, f"{{{MAIN}}}c", attrs)
+    return row
+
+
+def _register_namespaces(namespaces):
+    for prefix, uri in namespaces.items():
+        # ElementTree reserves ns0... internally; retain the original binding in
+        # the worksheet envelope, but serialize expanded names with a legal alias.
+        ET.register_namespace("r01_" + prefix if re.fullmatch(r"ns[0-9]+", prefix) else prefix, uri)
 
 
 def _unique(database, table, key):
@@ -166,14 +193,24 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
     before = file_sha256(input_path)
     _require(before == expected_input_sha256, "writer input SHA-256 does not match acquisition input")
     _require(bool(results), "empty acquisition batch is not a validated NO_DATA_CHANGE decision")
-    updates, seen_codes = {}, set()
+    updates, seen_codes, source_mapping = {}, set(), {}
     with R01PackageReader(input_path) as reader:
         _require(set(reader.sheet_paths) == REQUIRED_SHEETS, "exactly eight required R01 sheets required")
         histories = reader.read_stock_daily_index()
         registry = iter(reader._rows("source_registry"))
-        header = next(registry, {})
-        id_col = next((col for col, name in header.items() if name == "SOURCE_ID"), None)
-        registry_ids = {row.get(id_col, "") for row in registry} if id_col else set()
+        header = {col: value.strip().upper() for col, value in next(registry, {}).items() if value.strip()}
+        _require("SOURCE_ID" in header.values() and len(set(header.values())) == len(header),
+                 "source_registry requires unique headers including SOURCE_ID")
+        records = {}
+        for row in registry:
+            entry = {name: row.get(col, "").strip() for col, name in header.items()}
+            if not any(entry.values()):
+                continue
+            source_id = entry.get("SOURCE_ID", "")
+            _require(source_id and source_id not in records, "missing/duplicate source_registry SOURCE_ID")
+            records[source_id] = entry
+        synthetic = reader.read_metadata().get("FIXTURE_KIND") == "SYNTHETIC"
+        date_1904 = reader.date_1904
         shared = reader._shared_strings()
         member = reader.sheet_paths["stock_daily"]
         for result in results:
@@ -208,7 +245,15 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
                         if plan.request_start_date <= day <= plan.request_end_date}
             _require(expected <= {row.OBSERVATION_DATE for row in result.observations},
                      "normalized batch omitted existing overlap")
-            _require(source_ids.get(result.provider) in registry_ids, "explicit existing SOURCE_ID mapping required")
+            selected = source_ids.get(result.provider)
+            _require(selected in records, "explicit existing SOURCE_ID mapping required")
+            entry = records[selected]
+            yahoo_name = "YAHOO" in re.split(r"[^A-Z0-9]+", selected.upper() + " " + entry.get("SOURCE_NAME", "").upper())
+            host = urlparse(entry.get("SOURCE_URL", "")).hostname or ""
+            yahoo_url = host == "yahoo.com" or host.endswith(".yahoo.com")
+            _require(result.provider == "Yahoo Chart API" and (yahoo_name or yahoo_url or
+                     (synthetic and selected == "SYNTHETIC")), "SOURCE_ID does not identify the acquired provider")
+            source_mapping[result.provider] = entry
             for row in result.observations:
                 _require(row.RETRIEVED_AT is not None and row.SOURCE == result.provider and
                          row.RETRIEVED_AT == result.retrieved_at and row.RETRIEVED_AT.tzinfo is not None and
@@ -223,6 +268,7 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
             for table in ("input_keys", "output_keys"):
                 db.execute(f"CREATE TABLE {table} (code TEXT, day TEXT, PRIMARY KEY (code, day)) WITHOUT ROWID")
             matched, unaffected_before = set(), hashlib.sha256()
+            templates = {}
             counts = {code: {"replaced": 0, "inserted": 0} for code in seen_codes}
             root = None
             max_row, input_count = 0, 0
@@ -230,9 +276,7 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
                 _require(len(archive.namelist()) == len(set(archive.namelist())), "duplicate ZIP member names")
                 iterator = _rows(archive, member)
                 header_row, _, namespaces = next(iterator)
-                for prefix, uri in namespaces.items():
-                    _require(not re.fullmatch(r"ns[0-9]+", prefix), "reserved XML namespace prefix unsupported")
-                    ET.register_namespace(prefix, uri)
+                _register_namespaces(namespaces)
                 columns, date_name = _columns(_values(header_row, shared))
                 _require(header_row.get("r") == "1", "stock_daily header must be row 1")
                 max_row = 1
@@ -241,9 +285,11 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
                     _require(number > max_row, "stock_daily row numbers must increase")
                     max_row = number
                     values = _values(row, shared, allow_formulas=not updates)
-                    key = _key(values, columns, date_name)
+                    key = _key(values, columns, date_name, date_1904)
                     _unique(db, "input_keys", key)
                     input_count += 1
+                    if key[0] in seen_codes and (key[0] not in templates or key[1] > templates[key[0]][0]):
+                        templates[key[0]] = (key[1], deepcopy(row))
                     if key in updates:
                         matched.add(key)
                         counts[key[0]]["replaced"] += 1
@@ -261,24 +307,29 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
                     shutil.copyfile(input_path, staged)  # byte-identical NO_DATA_CHANGE; no recompression
                 else:
                     row_file = scratch / "rows.xml"
-                    for prefix, uri in namespaces.items():
-                        if not re.fullmatch(r"ns[0-9]+", prefix):
-                            ET.register_namespace(prefix, uri)
+                    _register_namespaces(namespaces)
                     with row_file.open("wb") as stream:
                         for index, (row, _, _) in enumerate(_rows(archive, member)):
                             if index:
-                                key = _key(_values(row, shared), columns, date_name)
+                                key = _key(_values(row, shared), columns, date_name, date_1904)
                                 if key in updates:
                                     row = _materialize(row, updates[key][0], columns, date_name, updates[key][1])
                             stream.write(ET.tostring(row, encoding="utf-8"))
                         for offset, key in enumerate(inserted, 1):
-                            row = ET.Element(f"{{{MAIN}}}row", {"r": str(max_row + offset)})
-                            row = _materialize(row, updates[key][0], columns, date_name, updates[key][1], new=True)
+                            template = templates[key[0]][1]
+                            row = _new_row(template, max_row + offset)
+                            row = _materialize(row, updates[key][0], columns, date_name, updates[key][1],
+                                               new=True, template=template, date_1904=date_1904)
                             stream.write(ET.tostring(row, encoding="utf-8"))
                     last_col = max(columns.values(), key=lambda col: (len(col), col))
                     dimension = root.find(f"{{{MAIN}}}dimension")
                     if dimension is not None:
-                        dimension.set("ref", f"A1:{last_col}{max_row + len(inserted)}")
+                        bounds = dimension.get("ref", "A1").split(":")
+                        end = re.fullmatch(r"([A-Z]+)([1-9][0-9]*)", bounds[-1])
+                        _require(end is not None, "invalid stock_daily dimension")
+                        end_col = max((last_col, end[1]), key=lambda col: (len(col), col))
+                        end_row = max(max_row + len(inserted), int(end[2]))
+                        dimension.set("ref", f"{bounds[0]}:{end_col}{end_row}")
                     auto_filter = root.find(f"{{{MAIN}}}autoFilter")
                     if auto_filter is not None and inserted:
                         bounds = re.fullmatch(r"([A-Z]+[1-9][0-9]*:)([A-Z]+)([1-9][0-9]*)", auto_filter.get("ref", ""))
@@ -327,7 +378,7 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
                     if not index:
                         _require(_columns(values) == (columns, date_name), "output schema changed")
                         continue
-                    key = _key(values, columns, date_name)
+                    key = _key(values, columns, date_name, date_1904)
                     _unique(db, "output_keys", key)
                     output_count += 1
                     if key in updates:
@@ -347,10 +398,14 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
             _require(unaffected_before.digest() == unaffected_after.digest(), "unaffected historical row changed")
             _require(file_sha256(input_path) == before, "input workbook changed during materialization")
             report = {"development_only": True, "production_approved": False,
-                      "generator_version": __version__, "writer_version": "0.2b-mvp-dev",
+                      "weekly_update_ready": False,
+                      "generator_version": __version__, "writer_version": "0.3-dev",
                       "writer_config_hash": canonical_hash({"source_ids": source_ids,
-                          "generator_config_hash": config.sha256, "writer_version": "0.2b-mvp-dev"}),
+                          "generator_config_hash": config.sha256, "writer_version": "0.3-dev"}),
                       "run_evidence": run_evidence or {},
+                      "source_mapping": source_mapping,
+                      "quality_summary": {"status": "STALE" if updates else "UNCHANGED",
+                          "recalculated": False, "affected_securities": sorted({key[0] for key in updates})},
                       "input_sha256": before, "input_sha256_after": file_sha256(input_path),
                       "output_sha256": file_sha256(staged), "output_path": str(output_path),
                       "input_row_count": input_count, "output_row_count": output_count,

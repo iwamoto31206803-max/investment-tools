@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+R01_StockFacts_20260924.xlsx
