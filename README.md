@@ -102,6 +102,24 @@ avoids workbook-wide cell objects and retains the existing Reader date indexes
 and shared-string handling. Production approval and formal quality calculations
 remain outside this MVP.
 
+Phase 3 hardens Reader/Writer compatibility: processed XML rows are released,
+shared strings are cached once (tables over 4 MiB use temporary SQLite with a
+bounded cache), rich strings exclude phonetic annotations, and 1900/1904 serial
+dates are supported. Insertions inherit existing cell styles and date encoding;
+namespace bindings used by compatibility attributes are retained. An existing
+SOURCE_ID must identify Yahoo by registry ID/name/URL; `SYNTHETIC` is accepted only
+on an explicitly marked synthetic fixture. This checks mapping consistency, not
+formal provider approval. Actual real-workbook SOURCE_IDs remain unverified.
+Writer evidence marks `quality_summary` as `STALE` after updates and
+`weekly_update_ready=false`; formal quality recalculation is still required.
+The private `R01_StockFacts_20260924.xlsx` is ignored by Git and was not available
+for real-data validation in this environment. No Drive/Baseline change is made.
+An offline synthetic scale run (199,500 rows; 219.7 MB worksheet XML) completed
+replacement/insertion with input hash preservation at about 46.7 MiB process
+peak RSS and 320 seconds including fixture generation. This is not a benchmark
+of the private real workbook; actual SOURCE_ID mapping and quality recalculation
+remain prerequisites to weekly readiness.
+
 Synthetic integration is reproducible without live network access using the supplied
 fixture generator and `scripts/run_phase2a_synthetic_integration.py`.
 See the [development integration report](docs/development/PHASE2A_SYNTHETIC_INTEGRATION_REPORT.md)

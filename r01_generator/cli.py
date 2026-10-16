@@ -122,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
                         "source_commit": context.source_commit, "config_hash": context.config_hash,
                         "development_contract_hash": context.development_contract_hash,
                         "normalized_output_sha256": context.normalized_output_sha256})
+                context.warnings.extend(context.writer_result["warnings"])
         else:
             context.validation_result = "BLOCKED" if context.blocked_count else "PASS"
         if file_sha256(args.input) != before:

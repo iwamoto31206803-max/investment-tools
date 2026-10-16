@@ -204,3 +204,101 @@ def test_cli_rejects_resolved_xlsx_log_alias_before_acquisition(fixture, tmp_pat
             "--output-xlsx", str(directory / ".." / directory.name / "run.json"),
             "--writer-source-id", "SYNTHETIC"])
     assert not directory.exists()
+
+
+@pytest.mark.parametrize("date_1904", [False, True])
+def test_shared_strings_numeric_dates_namespaces_and_inserted_styles(fixture, tmp_path, monkeypatch, date_1904):
+    import r01_generator.package_reader as package_reader
+    # Force the disk-backed path using a small fixture rather than adding large datasets.
+    monkeypatch.setattr(package_reader, "SHARED_STRINGS_DISK_THRESHOLD", 0)
+    with ZipFile(fixture) as archive:
+        contents = {name: archive.read(name) for name in archive.namelist()}
+    strings = []
+    sst = ET.Element(f"{{{MAIN}}}sst")
+    for name in list(contents):
+        if not name.startswith("xl/worksheets/"):
+            continue
+        root = ET.fromstring(contents[name])
+        for cell in root.findall(f".//{{{MAIN}}}c"):
+            inline = cell.find(f"{{{MAIN}}}is")
+            if inline is None:
+                continue
+            text = "".join(node.text or "" for node in inline.iter(f"{{{MAIN}}}t"))
+            cell.remove(inline)
+            if name.endswith("sheet5.xml") and cell.get("r").startswith("A") and cell.get("r") != "A1":
+                epoch = date(1904, 1, 1) if date_1904 else date(1899, 12, 30)
+                value = str((date.fromisoformat(text) - epoch).days)
+                cell.set("t", "n")
+                cell.set("s", "1")
+            else:
+                value = str(len(strings))
+                strings.append(text)
+                si = ET.SubElement(sst, f"{{{MAIN}}}si")
+                for part in (text[:2], text[2:]):
+                    ET.SubElement(ET.SubElement(si, f"{{{MAIN}}}r"), f"{{{MAIN}}}t").text = part
+                if text:
+                    ET.SubElement(ET.SubElement(si, f"{{{MAIN}}}rPh", {"sb": "0", "eb": str(len(text))}),
+                                  f"{{{MAIN}}}t").text = "ignored phonetics"
+                cell.set("t", "s")
+            ET.SubElement(cell, f"{{{MAIN}}}v").text = value
+        if name.endswith("sheet5.xml"):
+            # Styled empty header cells are formatting, not extra schema fields.
+            header = root.find(f"{{{MAIN}}}sheetData")[0]
+            ET.SubElement(header, f"{{{MAIN}}}c", {"r": "U1", "s": "1"})
+            root.insert(0, ET.Element(f"{{{MAIN}}}dimension", {"ref": "A1:U371"}))
+            ET.register_namespace("q", MAIN)
+            encoded = ET.tostring(root).replace(b"q:", b"ns0:").replace(b"xmlns:q=", b"xmlns:ns0=")
+            encoded = encoded.replace(b"<ns0:worksheet ", b'<ns0:worksheet xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" mc:Ignorable="x14ac" ')
+            contents[name] = encoded
+        else:
+            contents[name] = ET.tostring(root)
+    workbook = ET.fromstring(contents["xl/workbook.xml"])
+    workbook.insert(0, ET.Element(f"{{{MAIN}}}workbookPr", {"date1904": "1" if date_1904 else "0"}))
+    contents["xl/workbook.xml"] = ET.tostring(workbook)
+    contents["xl/sharedStrings.xml"] = ET.tostring(sst)
+    contents["xl/styles.xml"] = (f'<styleSheet xmlns="{MAIN}"><cellXfs count="2"><xf numFmtId="0"/>'
+                                  '<xf numFmtId="14" applyNumberFormat="1"/></cellXfs></styleSheet>').encode()
+    types = ET.fromstring(contents["[Content_Types].xml"])
+    for part, kind in (("sharedStrings", "sharedStrings"), ("styles", "styles")):
+        ET.SubElement(types, "{http://schemas.openxmlformats.org/package/2006/content-types}Override",
+                      {"PartName": f"/xl/{part}.xml", "ContentType": f"application/vnd.openxmlformats-officedocument.spreadsheetml.{kind}+xml"})
+    contents["[Content_Types].xml"] = ET.tostring(types)
+    relationships = ET.fromstring(contents["xl/_rels/workbook.xml.rels"])
+    for part in ("sharedStrings", "styles"):
+        ET.SubElement(relationships, "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship",
+                      {"Id": f"rId_{part}", "Type": f"http://schemas.openxmlformats.org/officeDocument/2006/relationships/{part}",
+                       "Target": f"{part}.xml"})
+    contents["xl/_rels/workbook.xml.rels"] = ET.tostring(relationships)
+    with ZipFile(fixture, "w") as archive:
+        for name, content in contents.items():
+            archive.writestr(name, content)
+    with R01PackageReader(fixture) as reader:
+        assert reader.read_metadata()["FIXTURE_KIND"] == "SYNTHETIC"
+        assert reader._shared_strings() is reader._shared_strings()
+        assert not isinstance(reader._shared_strings(), list)
+    output = tmp_path / "styled-output.xlsx"
+    report = write(fixture, output, acquired(fixture))
+    assert report["quality_summary"]["status"] == "STALE"
+    with R01PackageReader(output) as reader:
+        assert reader.read_stock_daily_index()["8725"].latest_observation_date == date(2026, 9, 24)
+    with ZipFile(output) as archive:
+        root = ET.fromstring(archive.read("xl/worksheets/sheet5.xml"))
+        inserted = root.findall(f".//{{{MAIN}}}row")[-1]
+        cell = inserted.find(f"{{{MAIN}}}c")
+        assert cell.get("s") == "1" and cell.get("t") == "n"
+        assert root.get("{http://schemas.openxmlformats.org/markup-compatibility/2006}Ignorable") == "x14ac"
+        assert b'xmlns:x14ac=' in archive.read("xl/worksheets/sheet5.xml")
+        assert root.find(f"{{{MAIN}}}dimension").get("ref") == "A1:U397"
+        assert archive.read("xl/styles.xml") == contents["xl/styles.xml"]
+
+
+def test_synthetic_source_id_cannot_relabel_unmarked_workbook(fixture, tmp_path):
+    results = acquired(fixture)
+    with ZipFile(fixture) as archive:
+        contents = {name: archive.read(name) for name in archive.namelist()}
+    contents["xl/worksheets/sheet1.xml"] = contents["xl/worksheets/sheet1.xml"].replace(b">SYNTHETIC<", b">UNMARKED<")
+    with ZipFile(fixture, "w") as archive:
+        for name, content in contents.items():
+            archive.writestr(name, content)
+    with pytest.raises(WriterError, match="does not identify"):
+        write(fixture, tmp_path / "wrong-provider.xlsx", results)
