@@ -25,6 +25,7 @@ from .config import GeneratorConfig
 from .package_reader import MAIN, REQUIRED_SHEETS, R01PackageReader, file_sha256, cell_value
 from .validation import PlanValidationError
 from . import __version__
+from .table_support import extend_stock_table
 
 
 class WriterError(ValueError):
@@ -272,6 +273,7 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
             counts = {code: {"replaced": 0, "inserted": 0} for code in seen_codes}
             root = None
             max_row, input_count = 0, 0
+            table_change = None
             with ZipFile(input_path) as archive:
                 _require(len(archive.namelist()) == len(set(archive.namelist())), "duplicate ZIP member names")
                 iterator = _rows(archive, member)
@@ -296,10 +298,13 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
                     else:
                         _fingerprint(unaffected_before, row)
                 _require(root is not None, "stock_daily historical rows required")
-                for tag in ("tableParts", "mergeCells", "extLst"):
+                for tag in ("mergeCells", "extLst"):
                     _require(not updates or root.find(f"{{{MAIN}}}{tag}") is None,
                              f"stock_daily {tag} unsupported by selective MVP")
                 inserted = sorted(set(updates) - matched)
+                if updates:
+                    table_change = extend_stock_table(archive, member, root, columns,
+                                                      max_row, max_row + len(inserted), _require)
                 for key in inserted:
                     counts[key[0]]["inserted"] += 1
                 staged = scratch / "output.xlsx"
@@ -352,7 +357,9 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
                         target.comment = archive.comment
                         for info in archive.infolist():
                             with target.open(copy(info), "w") as destination:
-                                if info.filename != member:
+                                if table_change and info.filename == table_change[0]:
+                                    destination.write(table_change[2])
+                                elif info.filename != member:
                                     with archive.open(info) as source:
                                         shutil.copyfileobj(source, destination, length=1024 * 1024)
                                 else:
@@ -368,7 +375,10 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
             with ZipFile(input_path) as old, ZipFile(staged) as new:
                 _require(old.namelist() == new.namelist(), "output ZIP membership changed")
                 for name in old.namelist():
-                    if name != member:
+                    if table_change and name == table_change[0]:
+                        _require(old.read(name) == table_change[1] and new.read(name) == table_change[2],
+                                 "table definition differs from validated range edit")
+                    elif name != member:
                         with old.open(name) as a, new.open(name) as b:
                             while chunk := a.read(1024 * 1024):
                                 _require(chunk == b.read(len(chunk)), "unaffected ZIP component changed")
@@ -399,17 +409,20 @@ def write_development_xlsx(input_path, output_path, results, *, expected_input_s
             _require(file_sha256(input_path) == before, "input workbook changed during materialization")
             report = {"development_only": True, "production_approved": False,
                       "weekly_update_ready": False,
-                      "generator_version": __version__, "writer_version": "0.3-dev",
+                      "generator_version": __version__, "writer_version": "0.3.1-dev",
                       "writer_config_hash": canonical_hash({"source_ids": source_ids,
-                          "generator_config_hash": config.sha256, "writer_version": "0.3-dev"}),
+                          "generator_config_hash": config.sha256, "writer_version": "0.3.1-dev"}),
                       "run_evidence": run_evidence or {},
                       "source_mapping": source_mapping,
+                      "table_update": ({"part": table_change[0],
+                          "range_changed": table_change[1] != table_change[2]} if table_change else None),
                       "quality_summary": {"status": "STALE" if updates else "UNCHANGED",
                           "recalculated": False, "affected_securities": sorted({key[0] for key in updates})},
                       "input_sha256": before, "input_sha256_after": file_sha256(input_path),
                       "output_sha256": file_sha256(staged), "output_path": str(output_path),
                       "input_row_count": input_count, "output_row_count": output_count,
-                      "updated_securities": counts, "preserved_components": len(old.namelist()) - (1 if updates else 0),
+                      "updated_securities": counts, "preserved_components": len(old.namelist()) -
+                          (1 if updates else 0) - (1 if table_change and table_change[1] != table_change[2] else 0),
                       "supported_modes": ["OVERLAP", "NO_DATA_CHANGE"],
                       "unsupported_modes": ["BACKFILL", "FULL_REFRESH"],
                       "warnings": ["Formal quality_summary and derived business fields are not recalculated"],
