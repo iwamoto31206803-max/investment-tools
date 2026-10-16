@@ -84,8 +84,17 @@ factor and quality flags are cleared rather than retaining stale derived values.
 Other seven sheets, including quality_summary, remain unchanged. Formal quality
 is **not recalculated**; the new workbook is development-only and comes with
 `updated.xlsx.writer.json` evidence plus the CLI run log. BACKFILL/FULL_REFRESH,
-stock_daily formulas/tables/merged cells/extensions are unsupported for updates
-and fail closed. NO_DATA_CHANGE copies the input bytes without XML rewriting.
+stock_daily formulas/merged cells/extensions are unsupported for updates and
+fail closed. NO_DATA_CHANGE copies the input bytes without XML rewriting.
+
+Phase 3.1 supports one existing, full-width stock_daily Excel Table resolved
+through its worksheet relationship. Insertions extend its `ref`, table autoFilter,
+and worksheet dimension; other table bytes and relationship parts stay unchanged.
+Totals/query/XML tables, calculated columns, sorting metadata, extensions,
+multiple tables, external targets and inconsistent ranges are rejected. The
+registered `YAHOO_CHART` ID with a Yahoo URL (including query2.finance.yahoo.com)
+is accepted without changing source_registry. Validation uses a synthetic Table
+fixture; the private real workbook has not been updated or directly verified.
 
 Run a complete offline demonstration (no live transport is constructed):
 

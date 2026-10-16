@@ -302,3 +302,116 @@ def test_synthetic_source_id_cannot_relabel_unmarked_workbook(fixture, tmp_path)
             archive.writestr(name, content)
     with pytest.raises(WriterError, match="does not identify"):
         write(fixture, tmp_path / "wrong-provider.xlsx", results)
+
+
+@pytest.fixture
+def table_fixture(fixture):
+    from scripts.generate_r01_synthetic_fixture import HEADERS
+    from r01_generator.package_reader import DOC_REL, PKG_REL
+    with ZipFile(fixture) as archive:
+        contents = {name: archive.read(name) for name in archive.namelist()}
+    # Deliberately not table5.xml: relationship resolution must choose this part.
+    selected_part = "xl/tables/stockdaily-custom.xml"
+    types = ET.fromstring(contents["[Content_Types].xml"])
+    for sheet, index, part, table_id, table_name, last_col, last_row in (
+        ("stock_daily", 5, selected_part, 5, "stockdailyTable", "T", 371),
+        ("stock_master", 3, "xl/tables/table5.xml", 3, "stockmasterTable", "O", 3),
+    ):
+        ref = f"A1:{last_col}{last_row}"
+        root = ET.fromstring(contents[f"xl/worksheets/sheet{index}.xml"])
+        root.insert(0, ET.Element(f"{{{MAIN}}}dimension", {"ref": ref}))
+        ET.SubElement(ET.SubElement(root, f"{{{MAIN}}}tableParts", {"count": "1"}),
+                      f"{{{MAIN}}}tablePart", {f"{{{DOC_REL}}}id": "rIdTable"})
+        contents[f"xl/worksheets/sheet{index}.xml"] = ET.tostring(root)
+        rels = ET.Element(f"{{{PKG_REL}}}Relationships")
+        ET.SubElement(rels, f"{{{PKG_REL}}}Relationship", {"Id": "rIdTable", "Type": DOC_REL + "/table",
+                      "Target": "../tables/" + part.rsplit("/", 1)[1]})
+        contents[f"xl/worksheets/_rels/sheet{index}.xml.rels"] = ET.tostring(rels)
+        table = ET.Element(f"{{{MAIN}}}table", {"id": str(table_id), "name": table_name,
+                           "displayName": table_name, "ref": ref, "totalsRowShown": "0"})
+        ET.SubElement(table, f"{{{MAIN}}}autoFilter", {"ref": ref})
+        names = HEADERS[sheet].split()
+        columns = ET.SubElement(table, f"{{{MAIN}}}tableColumns", {"count": str(len(names))})
+        for number, name in enumerate(names, 1):
+            ET.SubElement(columns, f"{{{MAIN}}}tableColumn", {"id": str(number), "name": name})
+        ET.SubElement(table, f"{{{MAIN}}}tableStyleInfo", {"name": "TableStyleMedium2", "showRowStripes": "1"})
+        contents[part] = ET.tostring(table)
+        ET.SubElement(types, "{http://schemas.openxmlformats.org/package/2006/content-types}Override",
+                      {"PartName": "/" + part, "ContentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"})
+    contents["[Content_Types].xml"] = ET.tostring(types)
+    registry = ET.fromstring(contents["xl/worksheets/sheet2.xml"])
+    row = registry.findall(f".//{{{MAIN}}}row")[1]
+    for col, value in {"A": "YAHOO_CHART", "B": "Yahoo Chart API",
+                       "C": "https://query2.finance.yahoo.com/v8/finance/chart/"}.items():
+        cell = next(cell for cell in row if cell.get("r") == col + "2")
+        for child in list(cell):
+            cell.remove(child)
+        cell.set("t", "inlineStr")
+        ET.SubElement(ET.SubElement(cell, f"{{{MAIN}}}is"), f"{{{MAIN}}}t").text = value
+    contents["xl/worksheets/sheet2.xml"] = ET.tostring(registry)
+    contents["xl/worksheets/sheet5.xml"] = contents["xl/worksheets/sheet5.xml"].replace(b">SYNTHETIC<", b">YAHOO_CHART<")
+    with ZipFile(fixture, "w") as archive:
+        for name, content in contents.items():
+            archive.writestr(name, content)
+    return fixture, selected_part
+
+
+def test_table_overlap_extends_resolved_table_and_preserves_every_other_part(table_fixture, tmp_path):
+    fixture, selected = table_fixture
+    before = file_sha256(fixture)
+    output = tmp_path / "table-output.xlsx"
+    report = write_development_xlsx(fixture, output, acquired(fixture), expected_input_sha256=before,
+                                    source_ids={"Yahoo Chart API": "YAHOO_CHART"})
+    assert report["updated_securities"] == {"8725": {"replaced": 20, "inserted": 26}}
+    assert report["table_update"] == {"part": selected, "range_changed": True}
+    with ZipFile(fixture) as old, ZipFile(output) as new:
+        root = ET.fromstring(new.read("xl/worksheets/sheet5.xml"))
+        assert root.find(f"{{{MAIN}}}dimension").get("ref") == "A1:T397"
+        table = ET.fromstring(new.read(selected))
+        assert table.get("ref") == table.find(f"{{{MAIN}}}autoFilter").get("ref") == "A1:T397"
+        assert table.get("id") == "5" and table.get("name") == "stockdailyTable"
+        assert new.read(selected) == old.read(selected).replace(b"A1:T371", b"A1:T397")
+        for name in old.namelist():
+            if name not in {selected, "xl/worksheets/sheet5.xml"}:
+                assert new.read(name) == old.read(name)
+    assert file_sha256(fixture) == before
+    assert len(rows(output)) == 396  # existing Reader reopens and every key is unique
+
+
+@pytest.mark.parametrize("bad", ["external", "wrong_range", "totals", "multiple"])
+def test_complex_or_inconsistent_table_rejected_without_output(table_fixture, tmp_path, bad):
+    fixture, selected = table_fixture
+    from r01_generator.package_reader import PKG_REL
+    with ZipFile(fixture) as archive:
+        contents = {name: archive.read(name) for name in archive.namelist()}
+    if bad == "external":
+        name = "xl/worksheets/_rels/sheet5.xml.rels"
+        root = ET.fromstring(contents[name])
+        root.find(f"{{{PKG_REL}}}Relationship").set("TargetMode", "External")
+    elif bad == "multiple":
+        name = "xl/worksheets/sheet5.xml"
+        root = ET.fromstring(contents[name])
+        root.find(f"{{{MAIN}}}tableParts").set("count", "2")
+    else:
+        name = selected
+        root = ET.fromstring(contents[name])
+        root.set("ref" if bad == "wrong_range" else "totalsRowCount", "A1:T370" if bad == "wrong_range" else "1")
+    contents[name] = ET.tostring(root)
+    with ZipFile(fixture, "w") as archive:
+        for name, content in contents.items():
+            archive.writestr(name, content)
+    output = tmp_path / "rejected-table.xlsx"
+    before = file_sha256(fixture)
+    with pytest.raises(WriterError):
+        write_development_xlsx(fixture, output, acquired(fixture), expected_input_sha256=before,
+                               source_ids={"Yahoo Chart API": "YAHOO_CHART"})
+    assert not output.exists() and not output.with_suffix(".xlsx.writer.json").exists()
+    assert file_sha256(fixture) == before
+
+
+def test_table_no_data_change_stays_byte_identical(table_fixture, tmp_path):
+    fixture, _ = table_fixture
+    result = acquired(fixture, decision=RunDecision(no_new_price_facts=True))
+    output = tmp_path / "unchanged-table.xlsx"
+    write_development_xlsx(fixture, output, result, expected_input_sha256=file_sha256(fixture), source_ids={})
+    assert file_sha256(output) == file_sha256(fixture)
